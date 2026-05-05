@@ -29,25 +29,11 @@ def scan_and_book_due_classes():
                 continue
 
             logger.info("Auto-booking %d class(es) for %s", len(due_ids), account.name)
+            # Per-class outcomes are logged inside book_selected_classes
+            # (via the "bookings" logger → bookings log file). No need to
+            # repeat them here.
             try:
-                results = book_selected_classes(db, account.id, due_ids)
-                for result in results:
-                    if result.get("success"):
-                        logger.info(
-                            "  [OK]   %s on %s for %s: %s",
-                            result["class_name"],
-                            result["day"],
-                            account.name,
-                            result.get("message") or "booked",
-                        )
-                    else:
-                        logger.warning(
-                            "  [FAIL] %s on %s for %s: %s",
-                            result["class_name"],
-                            result["day"],
-                            account.name,
-                            result.get("message") or "unknown error",
-                        )
+                book_selected_classes(db, account.id, due_ids)
             except Exception as exc:
                 logger.error("Auto-book failed for %s: %s", account.name, exc)
     finally:

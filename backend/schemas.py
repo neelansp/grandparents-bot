@@ -49,3 +49,19 @@ class SelectedClassResponse(BaseModel):
 
 class BookingRequest(BaseModel):
     selection_ids: list[str] = []
+
+
+class ClassPresetCreate(BaseModel):
+    class_name: str
+    day_of_week: str
+
+
+class ClassPresetResponse(BaseModel):
+    id: str
+    account_id: str
+    class_name: str
+    day_of_week: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

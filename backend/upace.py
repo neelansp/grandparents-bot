@@ -20,7 +20,9 @@ UID = "110"
 
 class UpaceClient:
     def __init__(self):
-        self.client = httpx.Client()
+        # Upace can be slow to respond around the T-5 reservation window
+        # (everyone hits the API at once). httpx's 5s default was too tight.
+        self.client = httpx.Client(timeout=20.0)
         self.api_key = None
         self.user_login_key = None
 

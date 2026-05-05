@@ -19,14 +19,46 @@ from fastapi.middleware.cors import CORSMiddleware
 BACKEND_DIR = Path(__file__).resolve().parent
 load_dotenv(BACKEND_DIR / ".env", override=False)
 
-logging.basicConfig(level=logging.INFO)
+# The console gets everything (helpful while developing). The log FILE
+# only gets booking outcomes — one line per attempt to book a class —
+# so it's easy to scan for "did this class get booked? when?" without
+# wading through HTTP calls and scheduler ticks.
+LOG_FILE = BACKEND_DIR / "data" / "api_calls.log"
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+# Dedicated logger named "bookings". Anywhere in the code that wants to
+# record a booking outcome calls logging.getLogger("bookings").info(...).
+# Only this logger writes to the file. Millisecond timestamps so we can
+# verify the scheduler fired at exactly T - 5 days.
+#
+# Guard against double-attaching: when uvicorn runs with reload=True it
+# imports main.py twice in the same process (once as __mp_main__, once
+# as main). Without this check, the same FileHandler gets attached
+# twice and every booking ends up logged twice.
+booking_log = logging.getLogger("bookings")
+booking_log.setLevel(logging.INFO)
+if not booking_log.handlers:
+    _booking_handler = logging.FileHandler(LOG_FILE)
+    _booking_handler.setFormatter(logging.Formatter(
+        "%(asctime)s.%(msecs)03d %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    booking_log.addHandler(_booking_handler)
+
 logger = logging.getLogger(__name__)
+logger.info("Booking outcomes logged to: %s", LOG_FILE)
 
 
 # Import AFTER load_dotenv so env-var-driven modules see the values.
 from database import create_tables
 from routes.accounts import router as accounts_router
 from routes.classes import router as classes_router
+from routes.presets import router as presets_router
 from scheduler import start_scheduler
 from seed import seed_accounts
 
@@ -52,6 +84,7 @@ app.add_middleware(
 
 app.include_router(accounts_router)
 app.include_router(classes_router)
+app.include_router(presets_router)
 
 
 @app.on_event("startup")

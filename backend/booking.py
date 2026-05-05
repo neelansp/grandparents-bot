@@ -4,11 +4,20 @@
 # into this file. That way the rules for "when is a class due?" and "how do
 # we log into Upace?" only live in one place.
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 
 from database import Account, BookingHistory, SelectedClass
 from upace import UpaceClient
+
+
+logger = logging.getLogger(__name__)
+
+# Dedicated logger for booking outcomes. This one writes to the
+# bookings file (configured in main.py) so the file only ever contains
+# one line per booking attempt — easy to scan.
+booking_log = logging.getLogger("bookings")
 
 
 # Upace opens reservations exactly 5 days before class start.
@@ -236,6 +245,27 @@ def book_selected_classes(db, account_id, selection_ids=None):
 
             success = not is_error_response(response)
             message = response.get("message")
+
+            # One line per attempt → bookings log file. This is the
+            # only thing that file ever contains, so it's easy to scan.
+            if success:
+                booking_log.info(
+                    "BOOKED  %s on %s %s for %s — %s",
+                    cls.class_name,
+                    cls.day,
+                    cls.time,
+                    account.name,
+                    message or "ok",
+                )
+            else:
+                booking_log.warning(
+                    "FAILED  %s on %s %s for %s — %s",
+                    cls.class_name,
+                    cls.day,
+                    cls.time,
+                    account.name,
+                    message or "unknown error",
+                )
 
             # Record the attempt in booking_history.
             db.add(BookingHistory(

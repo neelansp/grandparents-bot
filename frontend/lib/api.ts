@@ -93,6 +93,43 @@ export async function bookClasses(accountId: string, selectionIds: string[] = []
 }
 
 
+export type PresetEntryResponse = {
+  id: string;
+  account_id: string;
+  class_name: string;
+  day_of_week: string;
+  created_at?: string;
+};
+
+
+export async function getPreset(accountId: string) {
+  const response = await fetch(`${API_BASE_URL}/presets/${accountId}`);
+  return handleResponse(response) as Promise<PresetEntryResponse[]>;
+}
+
+
+export async function addPresetEntry(
+  accountId: string,
+  className: string,
+  dayOfWeek: string
+) {
+  const response = await fetch(`${API_BASE_URL}/presets/${accountId}`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ class_name: className, day_of_week: dayOfWeek }),
+  });
+  return handleResponse(response) as Promise<PresetEntryResponse>;
+}
+
+
+export async function deletePresetEntry(presetId: string) {
+  const response = await fetch(`${API_BASE_URL}/presets/${presetId}`, {
+    method: "DELETE",
+  });
+  return handleResponse(response);
+}
+
+
 export async function healthCheck() {
   try {
     const response = await fetch(`${API_BASE_URL}/health`);

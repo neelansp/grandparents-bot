@@ -1,9 +1,13 @@
 # This file sets up the SQLite database and defines the tables.
 #
-# There are three tables:
+# There are four tables:
 #   - accounts: one row per grandparent (their Upace login info)
 #   - selected_classes: classes someone has picked and wants to book
 #   - booking_history: a log of every booking attempt (success or fail)
+#   - class_presets: the per-account "weekly preset" — a list of class
+#     names the person wants to take on each day of the week. Clicking
+#     "Apply Preset" on the planner picks the earliest available class
+#     of that name on that day and adds it as a selection.
 #
 # Call create_tables() once on startup to make the tables if they don't exist.
 
@@ -52,6 +56,19 @@ class SelectedClass(Base):
     status = Column(String, default="scheduled")
     attempted_at = Column(DateTime, nullable=True)
     last_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ClassPreset(Base):
+    __tablename__ = "class_presets"
+
+    id = Column(String, primary_key=True)
+    account_id = Column(String, index=True)
+    # The class's display name (e.g. "Yoga Flow"). Match is by name only —
+    # different times or instructors on the same day-of-week still count.
+    class_name = Column(String)
+    # "Monday", "Tuesday", ... "Sunday".
+    day_of_week = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

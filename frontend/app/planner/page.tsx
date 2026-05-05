@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AccountSwitcher from "@/components/AccountSwitcher";
 import DayTabs from "@/components/DayTabs";
@@ -9,6 +10,7 @@ import SelectedClassesPreview from "@/components/SelectedClassesPreview";
 import ReviewWeekButton from "@/components/ReviewWeekButton";
 import { useAccounts } from "@/lib/accountStore";
 import { useClasses, type ClassType } from "@/lib/classStore";
+import { getPreset } from "@/lib/api";
 
 
 const daysOfWeek = [
@@ -54,6 +56,43 @@ function formatDateForApi(date: Date) {
 }
 
 
+// Turn "5:30 PM" or "17:30" into minutes-since-midnight so we can pick the
+// earliest available class when applying a preset.
+function parseTimeToMinutes(time: string): number {
+  const ampm = time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = parseInt(ampm[2], 10);
+    const period = ampm[3].toUpperCase();
+    if (period === "PM" && h !== 12) h += 12;
+    if (period === "AM" && h === 12) h = 0;
+    return h * 60 + m;
+  }
+  const hhmm = time.match(/^(\d+):(\d+)/);
+  if (hhmm) {
+    return parseInt(hhmm[1], 10) * 60 + parseInt(hhmm[2], 10);
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+
+// JS Date.getDay() returns 0=Sunday..6=Saturday. We want the day-name
+// string in our Monday-first list.
+function dayNameForDateString(dateStr: string): string {
+  const date = new Date(`${dateStr}T00:00:00`);
+  const jsDay = date.getDay();
+  const mondayFirstIndex = (jsDay + 6) % 7;
+  return daysOfWeek[mondayFirstIndex];
+}
+
+
+type ApplyPresetResult = {
+  added: number;
+  notFoundDays: string[];
+  errors: string[];
+};
+
+
 function formatWeekRange(weekOffset: number) {
   const weekStart = getWeekStart(new Date(), weekOffset);
   const weekEnd = new Date(weekStart);
@@ -97,6 +136,8 @@ export default function PlannerPage() {
   const [selectedDay, setSelectedDay] = useState("Monday");
   const [searchTerm, setSearchTerm] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [applyingPreset, setApplyingPreset] = useState(false);
+  const [applyResult, setApplyResult] = useState<ApplyPresetResult | null>(null);
 
   const selectedAccountId =
     currentAccount?.id ?? authenticatedAccounts[0]?.id ?? "";
@@ -176,6 +217,84 @@ export default function PlannerPage() {
     } catch {
       // Class context already surfaces the error state.
     }
+  }
+
+  async function handleApplyPreset() {
+    if (!selectedAccountId) return;
+
+    setApplyingPreset(true);
+    setApplyResult(null);
+
+    // Step 1: load the saved preset for this account.
+    let presetEntries;
+    try {
+      presetEntries = await getPreset(selectedAccountId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load preset";
+      setApplyResult({ added: 0, notFoundDays: [], errors: [message] });
+      setApplyingPreset(false);
+      return;
+    }
+
+    if (presetEntries.length === 0) {
+      setApplyResult({
+        added: 0,
+        notFoundDays: [],
+        errors: [
+          "Your preset is empty. Click 'Configure Preset' to add classes first.",
+        ],
+      });
+      setApplyingPreset(false);
+      return;
+    }
+
+    // Step 2: walk each preset entry, find earliest matching class in the
+    // visible week, and add it as a selection. Collect ALL errors so the
+    // user sees everything that went wrong.
+    const errors: string[] = [];
+    const notFoundDays: string[] = [];
+    let added = 0;
+
+    for (const entry of presetEntries) {
+      const matches = availableClasses.filter((cls) => {
+        if (cls.name !== entry.class_name) return false;
+        return dayNameForDateString(cls.day) === entry.day_of_week;
+      });
+
+      if (matches.length === 0) {
+        notFoundDays.push(`${entry.class_name} on ${entry.day_of_week}`);
+        continue;
+      }
+
+      matches.sort(
+        (a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time),
+      );
+      const pick = matches[0];
+
+      // Already selected on this day → silently skip (not a real error).
+      if (isClassSelected(pick.id, pick.day)) {
+        continue;
+      }
+
+      try {
+        await addSelectedClass(
+          selectedAccountId,
+          pick.id,
+          pick.name,
+          pick.day,
+          pick.time,
+          pick.instructor,
+          pick.slot_id,
+        );
+        added += 1;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to add class";
+        errors.push(`${pick.name} on ${pick.day}: ${message}`);
+      }
+    }
+
+    setApplyResult({ added, notFoundDays, errors });
+    setApplyingPreset(false);
   }
 
   async function handleDeselectAll() {
@@ -280,9 +399,74 @@ export default function PlannerPage() {
             </div>
           )}
 
-          <div className="pt-2">
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={handleApplyPreset}
+              disabled={applyingPreset || !selectedAccountId}
+              className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {applyingPreset ? "Applying..." : "Apply Preset"}
+            </button>
+
+            <Link
+              href="/preset"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-black"
+            >
+              Configure Preset
+            </Link>
+
             <ReviewWeekButton accountId={selectedAccountId} />
           </div>
+
+          {applyResult && (
+            <div className="grid gap-2 text-sm">
+              {applyResult.added > 0 && (
+                <div className="rounded-lg bg-green-50 p-3 text-green-800">
+                  Added {applyResult.added} class
+                  {applyResult.added === 1 ? "" : "es"} from preset.
+                </div>
+              )}
+              {applyResult.notFoundDays.length > 0 && (
+                <div className="rounded-lg bg-yellow-50 p-3 text-yellow-900">
+                  <p className="font-medium">
+                    Couldn&apos;t find {applyResult.notFoundDays.length} class
+                    {applyResult.notFoundDays.length === 1 ? "" : "es"} this week:
+                  </p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {applyResult.notFoundDays.map((entry, idx) => (
+                      <li key={idx}>{entry}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {applyResult.errors.length > 0 && (
+                <div className="rounded-lg bg-red-50 p-3 text-red-800">
+                  <p className="font-medium">Errors:</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {applyResult.errors.map((msg, idx) => (
+                      <li key={idx}>{msg}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {applyResult.added === 0 &&
+                applyResult.notFoundDays.length === 0 &&
+                applyResult.errors.length === 0 && (
+                  <div className="rounded-lg bg-blue-50 p-3 text-blue-900">
+                    Nothing to add — every preset class is already selected for
+                    this week.
+                  </div>
+                )}
+              <button
+                type="button"
+                onClick={() => setApplyResult(null)}
+                className="self-start text-xs underline text-gray-600"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr] items-start">
