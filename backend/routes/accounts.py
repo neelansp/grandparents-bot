@@ -12,6 +12,7 @@ from schemas import AccountResponse
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
+@router.get("", response_model=list[AccountResponse], include_in_schema=False)
 @router.get("/", response_model=list[AccountResponse])
 def list_accounts(db: Session = Depends(get_db)):
     """Return every account (grandparent) that's been seeded from .env."""
