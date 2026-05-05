@@ -24,7 +24,7 @@ async function handleResponse(response: Response) {
 
 
 export async function listAccounts() {
-  const response = await fetch(`${API_BASE_URL}/accounts`);
+  const response = await fetch(`${API_BASE_URL}/accounts/`);
   return handleResponse(response) as Promise<AccountResponse[]>;
 }
 
