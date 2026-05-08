@@ -5,8 +5,10 @@
 # we log into Upace?" only live in one place.
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from database import Account, BookingHistory, SelectedClass
 from upace import UpaceClient
@@ -23,29 +25,48 @@ booking_log = logging.getLogger("bookings")
 # Upace opens reservations exactly 5 days before class start.
 RESERVATION_LEAD_DAYS = 5
 
+# The venue's timezone. Class times from Upace are in this timezone, so we
+# pin our calculations to it instead of trusting the host system's clock.
+# ZoneInfo handles DST automatically. Override via VENUE_TIMEZONE env var.
+VENUE_TIMEZONE = ZoneInfo(os.getenv("VENUE_TIMEZONE", "America/New_York"))
+
 # The different time formats Upace might send us.
 TIME_FORMATS = ["%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M:%S %p"]
 
 
 def parse_class_datetime(day, time):
-    """Turn a day + time string into a Python datetime. Returns None if unparseable."""
+    """Turn a day + time string into a timezone-aware datetime in the venue's local time.
+
+    Returns None if unparseable. The result carries VENUE_TIMEZONE so comparisons
+    against the current time are correct regardless of the host system's clock.
+    """
     if not day or not time:
         return None
 
     for fmt in TIME_FORMATS:
         try:
-            return datetime.strptime(f"{day.strip()} {time.strip()}", f"%Y-%m-%d {fmt}")
+            naive = datetime.strptime(f"{day.strip()} {time.strip()}", f"%Y-%m-%d {fmt}")
+            return naive.replace(tzinfo=VENUE_TIMEZONE)
         except ValueError:
             continue
     return None
 
 
 def compute_reservation_open_at(day, time):
-    """Return the moment when Upace opens reservations for this class (T - 5 days)."""
+    """Return the moment when Upace opens reservations for this class (T - 5 days).
+
+    We subtract 5 *calendar days* in venue local time, not 5 * 24 hours of absolute
+    time. This matters across DST transitions: a class at 8:30 AM EDT booked from
+    a window that opens 5 days earlier in EST should open at 8:30 AM EST, not at
+    7:30 or 9:30. Doing the math with the timezone stripped gives wall-clock
+    subtraction; re-attaching VENUE_TIMEZONE then resolves the correct UTC offset
+    for that calendar date.
+    """
     class_dt = parse_class_datetime(day, time)
     if class_dt is None:
         return None
-    return class_dt - timedelta(days=RESERVATION_LEAD_DAYS)
+    naive_open = class_dt.replace(tzinfo=None) - timedelta(days=RESERVATION_LEAD_DAYS)
+    return naive_open.replace(tzinfo=VENUE_TIMEZONE)
 
 
 def is_error_response(response):
@@ -299,7 +320,7 @@ def book_selected_classes(db, account_id, selection_ids=None):
 
 def find_due_selection_ids(db, account_id):
     """Return ids of 'scheduled' selections whose T-5 day window has opened."""
-    now = datetime.now()
+    now = datetime.now(tz=VENUE_TIMEZONE)
     candidates = db.query(SelectedClass).filter(
         SelectedClass.account_id == account_id,
         SelectedClass.status == "scheduled",
