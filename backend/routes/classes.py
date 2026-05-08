@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from booking import (
+    VENUE_TIMEZONE,
     book_selected_classes,
     compute_reservation_open_at,
     fetch_booked_classes,
@@ -58,7 +59,7 @@ def select_class(selected: SelectedClassCreate, db: Session = Depends(get_db)):
     # If the T-5 day window has already passed, mark it "manual" so the
     # scheduler skips it (the user has to click "Reserve Now" themselves).
     open_at = compute_reservation_open_at(selected.day, selected.time)
-    if open_at and open_at > datetime.now():
+    if open_at and open_at > datetime.now(tz=VENUE_TIMEZONE):
         initial_status = "scheduled"
     else:
         initial_status = "manual"

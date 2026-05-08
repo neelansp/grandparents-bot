@@ -9,13 +9,19 @@
 #
 # Nothing in this file knows about our database. It just makes HTTP calls.
 
+import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
 
 BASE_URL = "https://www.upaceapp.com/Api"
 UID = "110"
+
+# Same venue timezone as booking.py — duplicated here to avoid a circular
+# import (booking.py already imports from this file).
+VENUE_TIMEZONE = ZoneInfo(os.getenv("VENUE_TIMEZONE", "America/New_York"))
 
 
 class UpaceClient:
@@ -63,7 +69,9 @@ class UpaceClient:
 
         # The mobile app sends the current time with this request so the
         # server knows which classes have already started. We do the same.
-        current_time = datetime.now().strftime("%H:%M:%S")
+        # Must be venue-local time (Upace's frame of reference), not host
+        # local time — they can differ on a UTC container.
+        current_time = datetime.now(tz=VENUE_TIMEZONE).strftime("%H:%M:%S")
 
         response = self.client.post(
             f"{BASE_URL}/upaceClasses",

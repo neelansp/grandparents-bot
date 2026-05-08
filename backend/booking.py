@@ -5,6 +5,7 @@
 # we log into Upace?" only live in one place.
 
 import logging
+
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -298,9 +299,11 @@ def book_selected_classes(db, account_id, selection_ids=None):
                 message=message,
             ))
 
-            # Update the selection row's status.
+            # Update the selection row's status. The DB column is a naive
+            # DateTime, so we store venue-local wall-clock time (with the tz
+            # stripped) to keep stored values consistent across host timezones.
             cls.status = "booked" if success else "failed"
-            cls.attempted_at = datetime.now()
+            cls.attempted_at = datetime.now(tz=VENUE_TIMEZONE).replace(tzinfo=None)
             cls.last_message = message
 
             results.append({
